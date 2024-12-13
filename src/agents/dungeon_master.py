@@ -163,6 +163,45 @@ class DungeonMaster(BaseAgent):
         
         return {"success": True, "message": response}
 
+    async def _handle_interact(self, action: Dict[str, Any], player_id: Optional[str]) -> Dict[str, Any]:
+        """Handle interaction with objects or environment."""
+        target = action.get("target", "")
+        current_loc = self.locations.get(self.world_state["current_location"])
+        
+        # Check if target is an item in current location
+        if target in current_loc.items:
+            return {
+                "success": True,
+                "message": f"You interact with the {target}.",
+                "details": f"It seems to be a normal {target}."
+            }
+        
+        # Check if it's a general environment interaction
+        return {
+            "success": True,
+            "message": f"You try to interact with {target or 'the surroundings'}.",
+            "details": "Nothing special happens."
+        }
+
+    async def _handle_use(self, action: Dict[str, Any], player_id: Optional[str]) -> Dict[str, Any]:
+        """Handle using items or abilities."""
+        content = action.get("content", "")
+        
+        # For now, interpret 'use' actions that look like dialog as 'talk' actions
+        if "barkeep" in content.lower() or "speak" in content.lower():
+            return await self._handle_talk({
+                "type": "talk",
+                "target": "barkeep",
+                "dialog": content
+            }, player_id)
+        
+        # Generic use action response
+        return {
+            "success": True,
+            "message": "You try to use something.",
+            "details": content
+        }
+
     async def _handle_unknown(self, action: Dict[str, Any], player_id: Optional[str]) -> Dict[str, Any]:
         """Handle unknown action types."""
         return {
@@ -178,3 +217,50 @@ class DungeonMaster(BaseAgent):
                 connected_locs = self.locations[npc.location].connected_to
                 if connected_locs:
                     npc.location = connected_locs[0]  # Simple movement logic
+
+    async def _update_world_state(self, action_type: str, result: Dict[str, Any]) -> None:
+        """Update world state based on action results."""
+        # Update last action timestamp
+        self.world_state["last_action"] = {
+            "type": action_type,
+            "timestamp": datetime.now().isoformat(),
+            "result": result.get("success", False)
+        }
+
+        # Update specific states based on action type
+        if action_type == "move" and result.get("success"):
+            self.world_state["current_location"] = result.get("destination", self.world_state["current_location"])
+        
+        elif action_type == "talk" and result.get("success"):
+            npc_name = result.get("target")
+            if npc_name in self.npcs:
+                self.npcs[npc_name].dialog_state["last_conversation"] = datetime.now().isoformat()
+                
+        elif action_type == "interact" and result.get("success"):
+            current_loc = self.locations.get(self.world_state["current_location"])
+            if current_loc:
+                # Update location state if needed
+                target = result.get("target")
+                if target in current_loc.items:
+                    # Mark item as interacted with
+                    if "interacted_items" not in current_loc.__dict__:
+                        current_loc.__dict__["interacted_items"] = set()
+                    current_loc.__dict__["interacted_items"].add(target)
+
+        # Update quest progress if applicable
+        self._check_quest_progress(action_type, result)
+
+    def _check_quest_progress(self, action_type: str, result: Dict[str, Any]) -> None:
+        """Check and update quest progress based on actions."""
+        if not result.get("success"):
+            return
+
+        current_location = self.world_state["current_location"]
+        active_quests = self.world_state["active_quests"]
+
+        # Example quest progress check
+        if "Find the missing shipment" in active_quests:
+            if (action_type == "talk" and 
+                result.get("target") == "barkeep" and 
+                "shipment" in result.get("message", "").lower()):
+                self.world_state["global_state"]["main_quest_progress"] += 1
