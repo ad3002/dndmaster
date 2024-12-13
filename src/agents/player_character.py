@@ -5,6 +5,7 @@ import random
 
 from .base_agent import BaseAgent
 from ..utils.llm_client import LLMClient
+from ..utils.schemas import CharacterAction
 
 class Stat(Enum):
     STRENGTH = "STR"
@@ -80,24 +81,28 @@ class PlayerCharacter(BaseAgent):
 
     async def decideNextAction(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Decide next action based on context and character personality."""
-        # Build prompt for LLM
-        prompt = self._build_action_prompt(context)
-        
         try:
-            # Get action suggestion from LLM
-            action_response = await self.llm_client.call_llm(
-                prompt,
-                system_prompt=self._get_character_system_prompt()
+            # Get structured action from LLM
+            action = await self.llm_client.generate_character_action(
+                character_info=self.get_character_sheet(),
+                context={
+                    "scene": context.get("world_state", {}).get("current_location", {}),
+                    "available_actions": context.get("world_state", {}).get("possible_actions", []),
+                    "current_goal": self.current_goal,
+                    "last_action_result": context.get("world_state", {}).get("last_action", {})
+                }
             )
             
-            # Parse LLM response into action
-            action = self._parse_action_response(action_response)
-            
-            # Validate and enhance action with character stats
-            return self._enhance_action_with_stats(action)
+            # Convert structured action to game format
+            return {
+                "type": action.action_type,
+                "target": action.target,
+                "content": action.description,
+                "reasoning": action.reasoning,
+                "source": self.name
+            }
         
         except Exception as e:
-            # Fallback to basic action if LLM fails
             return self._get_fallback_action()
 
     def add_item(self, item: Item) -> None:
@@ -139,50 +144,24 @@ class PlayerCharacter(BaseAgent):
 
     def _build_action_prompt(self, context: Dict[str, Any]) -> str:
         """Build prompt for LLM to decide action."""
+        scene = context.get("world_state", {}).get("current_location", {})
+        available_actions = scene.get("possible_actions", [])
+        
         return f"""
-        As {self.name}, a {self.race} {self.character_class}, considering:
-        Current location: {context.get('scene', 'unknown')}
+        As {self.name}, a {self.race} {self.character_class}, you need to choose your next action.
+        
         Current goal: {self.current_goal}
-        Current HP: {self.stats.hp_current}/{self.stats.hp_max}
+        Available actions: {', '.join(available_actions)}
         
-        What would be your next action? Consider your personality:
-        Traits: {', '.join(self.personality['traits'])}
-        Ideals: {', '.join(self.personality['ideals'])}
+        Location description: {scene.get('description', 'unknown location')}
+        Visible NPCs: {', '.join(scene.get('visible_npcs', []))}
+        Visible objects: {', '.join(scene.get('visible_objects', []))}
         
-        Respond with a specific action and target.
+        Choose one of the available actions that best fits your personality and goal.
+        Your personality traits are:
+        - Traits: {', '.join(self.personality['traits'])}
+        - Ideals: {', '.join(self.personality['ideals'])}
         """
-
-    def _get_character_system_prompt(self) -> str:
-        """Get system prompt that defines character's personality."""
-        return f"""
-        You are role-playing a D&D character with the following traits:
-        Name: {self.name}
-        Class: {self.character_class}
-        Race: {self.race}
-        Background: {self.background}
-        
-        Make decisions and respond in character, considering their personality:
-        {self.personality}
-        """
-
-    def _parse_action_response(self, response: str) -> Dict[str, Any]:
-        """Parse LLM response into structured action."""
-        # Simple parsing - in real implementation, this would be more robust
-        action_types = ["look", "move", "talk", "attack", "use", "interact"]
-        
-        for action_type in action_types:
-            if action_type in response.lower():
-                return {
-                    "type": action_type,
-                    "content": response,
-                    "source": self.name,
-                }
-        
-        return {
-            "type": "unknown",
-            "content": response,
-            "source": self.name
-        }
 
     def _enhance_action_with_stats(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """Add relevant stat modifiers to action."""
