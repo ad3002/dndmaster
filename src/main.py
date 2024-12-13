@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import traceback
 from datetime import datetime
-from agents.game_coordinator import GameCoordinator
+from .agents.game_coordinator import GameCoordinator
 
-# Configure root logger
+# Configure root logger with more detailed formatting
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -96,7 +97,11 @@ async def main():
         await coordinator.start_game()
 
     except Exception as e:
-        logger.error(f"Error during game execution: {str(e)}")
+        logger.error(
+            "Error during game execution",
+            exc_info=True,  # This will include the full traceback
+            stack_info=True  # This will include the current stack frame
+        )
         raise
 
 if __name__ == "__main__":
@@ -105,4 +110,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Game terminated by user")
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(
+            "Unexpected error occurred",
+            exc_info=True,
+            stack_info=True
+        )
+        # Print the full traceback to console as well
+        print("\nFull traceback:")
+        traceback.print_exc()

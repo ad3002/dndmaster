@@ -2,13 +2,13 @@ import os
 import json
 import asyncio
 from typing import Dict, Any, Optional, List
-import openai
+from openai import AsyncOpenAI, OpenAIError, APIError, RateLimitError
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
 @dataclass
 class LLMConfig:
-    model: str = "4o-mini"
+    model: str = "gpt-4o-mini"
     temperature: float = 0.7
     max_tokens: int = 1000
     retry_attempts: int = 3
@@ -23,7 +23,7 @@ class LLMClient:
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         
-        openai.api_key = self.api_key
+        self.client = AsyncOpenAI(api_key=self.api_key)
         self.config = config or LLMConfig()
 
     async def call_llm(
@@ -50,7 +50,7 @@ class LLMClient:
 
         for attempt in range(self.config.retry_attempts):
             try:
-                response = await openai.ChatCompletion.acreate(
+                response = await self.client.chat.completions.create(
                     model=self.config.model,
                     messages=messages,
                     temperature=kwargs.get('temperature', self.config.temperature),
@@ -58,12 +58,12 @@ class LLMClient:
                 )
                 return response.choices[0].message.content
 
-            except openai.error.RateLimitError:
+            except RateLimitError as e:
                 if attempt == self.config.retry_attempts - 1:
                     raise
                 await asyncio.sleep(self.config.retry_delay * (attempt + 1))
                 
-            except openai.error.APIError as e:
+            except (APIError, OpenAIError) as e:
                 if attempt == self.config.retry_attempts - 1:
                     raise
                 await asyncio.sleep(self.config.retry_delay)
